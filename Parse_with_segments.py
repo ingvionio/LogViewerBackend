@@ -27,25 +27,19 @@ class ParseWithLogs:
 
                 try:
                     response = send_segment_to_plugin(segment, host, port)
-                    # Сохраняем данные плагина в сегмент
+
+
+                    # Если плагин вернул новые логи, можно их заменить/добавить
                     segment["PluginResponses"].append({
                         "plugin": f"{host}:{port}",
                         "success": response.success,
                         "message": response.message,
                         "metadata": dict(response.metadata),
-                        "logs_count": len(response.logs)
-                    })
-
-                    # Если плагин вернул новые логи, можно их заменить/добавить
-                    if response.logs:
-                        segment["Logs"] = [
-                            {
-                                "level": log.level,
-                                "message": log.message,
-                                "timestamp": log.timestamp,
-                                "module": log.module
-                            } for log in response.logs
+                        "filtered_logs": [  # ← новое поле
+                            {"level": log.level, "message": log.message}
+                            for log in response.logs
                         ]
+                    })
 
                 except Exception as e:
                     # Если плагин не отвечает, просто логируем
@@ -68,9 +62,12 @@ class ParseWithLogs:
         current_subsegment = None  # <-- объявляем подсегмент
         inside_segment = False
         segment_id = 1
+        log_id = 1  # уникальный порядковый номер для каждого лога
         #subsegment_id = 1  # уникальный ID для подсегмента
 
         for i, log in enumerate(logs):
+            log["Id"] = log_id
+            log_id += 1
             msg = log.get("message", "")
 
             # --- Начало сегмента ---
@@ -108,6 +105,8 @@ class ParseWithLogs:
                             "Id": 1,
                             "StartTime": log.get("timestamp"),
                             "EndTime": None,
+                            "StartId": log["Id"],  # <-- Id первого лога подсегмента
+                            "EndId": None,
                             "Logs": []
                         }
                         #subsegment_id += 1
@@ -123,6 +122,7 @@ class ParseWithLogs:
                                      "resource creation failed" in msg_lower))
                         if "plan is complete" in msg_lower or is_error:
                             current_subsegment["EndTime"] = log.get("timestamp")
+                            current_subsegment["EndId"] = log["Id"]
                             current_segment["SubSegment"] = current_subsegment  # <-- присваиваем в поле сегмента
                             current_subsegment = None
 
@@ -199,6 +199,7 @@ class ParseWithLogs:
 
         # --- режем на сегменты ---
         segments = cls.split_into_segments(enriched_logs)
+        segments = cls.process_segments_with_plugins(segments)
         return segments
 
     @classmethod

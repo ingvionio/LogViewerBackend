@@ -14,12 +14,14 @@ def send_segment_to_plugin(segment, host, port):
         segment_type=segment["Type"],
         start_time=segment["StartTime"] or "",
         end_time=segment["EndTime"] or "",
-        logs=[logplugin_pb2.LogEntry(
-            level=log.get("level", ""),
-            message=log.get("message", ""),
-            timestamp=log.get("timestamp", ""),
-            module=log.get("module", "")
-        ) for log in segment["Logs"]]
+        logs=[
+            logplugin_pb2.LogEntry(
+                level=str(log.get("level") or ""),
+                message=str(log.get("message") or ""),
+                timestamp=str(log.get("timestamp") or ""),
+                module=str(log.get("module") or "")
+            )
+            for log in segment["Logs"]]
     )
 
     # Вызываем плагин
