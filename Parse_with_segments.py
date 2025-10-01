@@ -162,7 +162,7 @@ class ParseWithLogs:
         return segments
 
     @classmethod
-    def parse_file(cls, logs: list) -> list:
+    def parse_file(cls, logs: list,  filename: str = "unknown") -> list:
         """
         Принимает путь к JSON-файлу с логами,
         обогащает логи (timestamp, level) и создаёт JSON-файл с сегментами.
@@ -213,7 +213,7 @@ class ParseWithLogs:
 
         # --- режем на сегменты ---
         segments = cls.split_into_segments(enriched_logs)
-        segments = cls.process_segments_with_plugins(segments)
+        #segments = cls.process_segments_with_plugins(segments, "123")
         return segments
 
     @classmethod

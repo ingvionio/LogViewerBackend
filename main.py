@@ -23,9 +23,10 @@ async def parse_json(file: UploadFile):
     text = content.decode("utf-8-sig")
     logs = [json.loads(line) for line in text.splitlines() if line.strip()]
 
-
+    # main.py
     segments = ParseWithLogs.parse_file(logs)
     await json_repo.save_json_file(file.filename, segments=segments)
+    await ParseWithLogs.process_segments_with_plugins(segments, file.filename)  # ← только здесь
     # Запускаем плагины (асинхронно)
     await ParseWithLogs.process_segments_with_plugins(segments, file.filename)
     return {"segments": segments}
