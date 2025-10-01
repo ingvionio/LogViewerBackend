@@ -1,6 +1,6 @@
 import json
 from collections import defaultdict
-
+from plugin_repository import PluginResultRepository
 from parse import Parse
 from plugin_client import send_segment_to_plugin
 
@@ -15,43 +15,57 @@ class ParseWithLogs:
     ]
 
     @classmethod
-    def process_segments_with_plugins(cls, segments):
+    async def process_segments_with_plugins(cls, segments, filename: str):
         """
-        Отправляет каждый сегмент на все плагины и добавляет результаты в сегмент.
+        Отправляет сегменты в плагины и сохраняет результаты в БД.
         """
+        plugin_repo = PluginResultRepository()
+
         for segment in segments:
-            segment["PluginResponses"] = []
             for plugin in cls.PLUGINS:
                 host = plugin["host"]
                 port = plugin["port"]
+                address = f"{host}:{port}"
 
                 try:
                     response = send_segment_to_plugin(segment, host, port)
 
+                    # Извлекаем имя плагина из метаданных (если есть)
+                    plugin_name = response.metadata.get("plugin", "unknown")
 
-                    # Если плагин вернул новые логи, можно их заменить/добавить
-                    segment["PluginResponses"].append({
-                        "plugin": f"{host}:{port}",
-                        "success": response.success,
-                        "message": response.message,
-                        "metadata": dict(response.metadata),
-                        "filtered_logs": [  # ← новое поле
-                            {"level": log.level, "message": log.message}
+                    # Сохраняем в БД
+                    await plugin_repo.save_plugin_result(
+                        filename=filename,
+                        segment_id=segment["Id"],
+                        plugin_address=address,
+                        plugin_name=plugin_name,
+                        success=response.success,
+                        message=response.message,
+                        metadata_json=dict(response.metadata),
+                        filtered_logs=[
+                            {
+                                "level": log.level,
+                                "message": log.message,
+                                "timestamp": log.timestamp,
+                                "module": log.module
+                            }
                             for log in response.logs
                         ]
-                    })
+                    )
 
                 except Exception as e:
-                    # Если плагин не отвечает, просто логируем
-                    segment["PluginResponses"].append({
-                        "plugin": f"{host}:{port}",
-                        "success": False,
-                        "message": str(e),
-                        "metadata": {},
-                        "logs_count": 0
-                    })
-
-        return segments
+                    # Сохраняем ошибку подключения
+                    await plugin_repo.save_plugin_result(
+                        filename=filename,
+                        segment_id=segment["Id"],
+                        plugin_address=address,
+                        plugin_name="unknown",
+                        success=False,
+                        message=str(e),
+                        metadata_json={},
+                        filtered_logs=[]
+                    )
+        return segments  # без PluginResponses!
     @classmethod
     def split_into_segments(cls, logs: list) -> list:
         """
@@ -207,16 +221,35 @@ class ParseWithLogs:
         """
         Обрабатывает список JSON объектов (dict) и группирует по tf_req_id
         """
+        enriched_logs = []
+        for entry in logs:
+            # убираем @ в ключах
+            entry = Parse.normalize_keys(entry)
+
+            msg = entry.get("message", "")
+            ts_existing = entry.get("timestamp")
+            lvl_existing = entry.get("level")
+
+            # --- извлекаем время и уровень ---
+            if ts_existing is None or lvl_existing is None or ts_existing == "" or lvl_existing == "":
+                ts, lvl = Parse.extract_timestamp_level(msg, ts_existing, lvl_existing)
+                if ts:
+                    entry["timestamp"] = ts
+                if lvl:
+                    entry["level"] = lvl
+
+            enriched_logs.append(entry)
         groups = defaultdict(list)
 
-        for line_num, log_obj in enumerate(logs, 1):
+
+        for line_num, log_obj in enumerate(enriched_logs, 1):
             try:
                 req_id = log_obj.get('tf_req_id')
 
                 if req_id:
                     log_entry = {
                         "Id": line_num,
-                        "line": json.dumps(log_obj)
+                        "line": log_obj
                     }
                     groups[req_id].append(log_entry)
 
