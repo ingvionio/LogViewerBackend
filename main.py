@@ -4,6 +4,8 @@ import json
 from Parse_with_segments import ParseWithLogs
 from database import json_repo
 from plugin_repository import PluginResultRepository
+import os
+from fastapi import Depends, HTTPException, Header
 
 app = FastAPI(title="Terraform Logs Parser API")
 
@@ -88,3 +90,69 @@ async def get_file_chains(filename: str):
         raise HTTPException(status_code=404, detail=f"Файл с названием '{filename}' не найден")
 
     return {"filename": filename, "chains": chains}
+
+# --- API для внешних систем (мониторинг, CI/CD, дашборды) ---
+
+
+# Зависимость для проверки API-ключа
+async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
+    expected_key = os.getenv("API_SECRET_KEY")
+    if not expected_key:
+        # В dev-режиме ключ не обязателен
+        return True
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return True
+
+@app.get("/api/v1/plugin-results",
+         summary="Get all plugin results",
+         description="⚠️ Может вернуть большой объём данных. Используйте с осторожностью.")
+async def get_all_plugin_results(api_key: bool = Depends(verify_api_key)):
+    plugin_repo = PluginResultRepository()
+    results = await plugin_repo.get_all_results()
+    return {"plugin_results": results}
+
+
+@app.get("/api/v1/files/{filename}/plugin-results",
+         summary="Get plugin results by filename",
+         description="Get all plugin results for a specific parsed file")
+async def get_plugin_results_by_file(
+    filename: str,
+    api_key: bool = Depends(verify_api_key)
+):
+    plugin_repo = PluginResultRepository()
+    results = await plugin_repo.get_results_by_filename(filename)
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No plugin results found for file '{filename}'")
+    return {"filename": filename, "plugin_results": results}
+
+
+@app.get("/api/v1/files/{filename}/segments/{segment_id}/plugin-results",
+         summary="Get plugin results by segment",
+         description="Get plugin results for a specific segment within a file")
+async def get_plugin_results_by_segment(
+    filename: str,
+    segment_id: int,
+    api_key: bool = Depends(verify_api_key)
+):
+    plugin_repo = PluginResultRepository()
+    results = await plugin_repo.get_results_by_segment(filename, segment_id)
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No results for segment {segment_id} in file '{filename}'")
+    return {
+        "filename": filename,
+        "segment_id": segment_id,
+        "plugin_results": results
+    }
+
+
+@app.get("/api/v1/plugins/{plugin_address}/results",
+         summary="Get results by plugin address",
+         description="Get all results from a specific plugin (e.g., 'localhost:50051')")
+async def get_results_by_plugin(
+    plugin_address: str,
+    api_key: bool = Depends(verify_api_key)
+):
+    plugin_repo = PluginResultRepository()
+    results = await plugin_repo.get_results_by_plugin(plugin_address)
+    return {"plugin_address": plugin_address, "plugin_results": results}
