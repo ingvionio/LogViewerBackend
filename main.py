@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 from Parse_with_segments import ParseWithLogs
 from database import json_repo
+from plugin_repository import PluginResultRepository
 
 app = FastAPI(title="Terraform Logs Parser API")
 
@@ -25,6 +26,8 @@ async def parse_json(file: UploadFile):
 
     segments = ParseWithLogs.parse_file(logs)
     await json_repo.save_json_file(file.filename, segments=segments)
+    # Запускаем плагины (асинхронно)
+    await ParseWithLogs.process_segments_with_plugins(segments, file.filename)
     return {"segments": segments}
 
 @app.post("/api/parsechainsjson")
@@ -40,6 +43,18 @@ async def parse_chains_json(file: UploadFile):
     chains = ParseWithLogs.parse_file_to_chain(logs)
     await json_repo.save_json_file(file.filename, chains=chains)
     return {"chains": chains}
+
+@app.get("/api/jsonfiles/{filename}/plugin-results")
+async def get_plugin_results(filename: str):
+    plugin_repo = PluginResultRepository()
+    results = await plugin_repo.get_results_by_filename(filename)
+    return {"filename": filename, "plugin_results": results}
+
+@app.get("/api/jsonfiles/{filename}/segments/{segment_id}/plugin-results")
+async def get_plugin_results_for_segment(filename: str, segment_id: int):
+    plugin_repo = PluginResultRepository()
+    results = await plugin_repo.get_results_by_segment(filename, segment_id)
+    return {"filename": filename, "segment_id": segment_id, "plugin_results": results}
 
 @app.get("/api/jsonfiles")
 async def get_all_json_filenames():
