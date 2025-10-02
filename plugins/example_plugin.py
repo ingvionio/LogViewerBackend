@@ -11,8 +11,8 @@ import grpc
 from concurrent import futures
 import time
 
-from proto import logplugin_pb2
-from proto import logplugin_pb2_grpc
+from proto.Logplugin import logplugin_pb2, logplugin_pb2_grpc
+
 
 class ExamplePlugin(logplugin_pb2_grpc.PluginServiceServicer):
     def ProcessSegment(self, request, context):

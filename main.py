@@ -1,3 +1,10 @@
+import asyncio
+from concurrent.futures.thread import ThreadPoolExecutor
+import atexit
+
+db_executor = ThreadPoolExecutor(max_workers=4)
+atexit.register(lambda: db_executor.shutdown(wait=True))
+
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import json
@@ -28,9 +35,17 @@ async def parse_json(file: UploadFile):
     # main.py
     segments = ParseWithLogs.parse_file(logs)
     await json_repo.save_json_file(file.filename, segments=segments)
-    await ParseWithLogs.process_segments_with_plugins(segments, file.filename)  # ← только здесь
+  # ← только здесь
     # Запускаем плагины (асинхронно)
-    await ParseWithLogs.process_segments_with_plugins(segments, file.filename)
+    #await ParseWithLogs.process_segments_with_plugins(segments, file.filename)
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,  # Используем дефолтный ThreadPoolExecutor
+        ParseWithLogs.process_segments_with_plugins,
+        segments,
+        file.filename
+    )
     return {"segments": segments}
 
 @app.post("/api/parsechainsjson")
@@ -47,17 +62,14 @@ async def parse_chains_json(file: UploadFile):
     await json_repo.save_json_file(file.filename, chains=chains)
     return {"chains": chains}
 
-@app.get("/api/jsonfiles/{filename}/plugin-results")
-async def get_plugin_results(filename: str):
-    plugin_repo = PluginResultRepository()
-    results = await plugin_repo.get_results_by_filename(filename)
-    return {"filename": filename, "plugin_results": results}
 
-@app.get("/api/jsonfiles/{filename}/segments/{segment_id}/plugin-results")
-async def get_plugin_results_for_segment(filename: str, segment_id: int):
+@app.get("/api/jsonfiles/{filename}/plugin-results")
+def get_plugin_results(filename: str):
     plugin_repo = PluginResultRepository()
-    results = await plugin_repo.get_results_by_segment(filename, segment_id)
-    return {"filename": filename, "segment_id": segment_id, "plugin_results": results}
+    results = plugin_repo.get_latest_results_by_filename(filename)
+    if not results:
+        raise HTTPException(status_code=404, detail=f"No plugin results found for file '{filename}'")
+    return {"filename": filename, "plugin_results": results}
 
 @app.get("/api/jsonfiles")
 async def get_all_json_filenames():
@@ -95,6 +107,7 @@ async def get_file_chains(filename: str):
 
 
 # Зависимость для проверки API-ключа
+
 async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
     expected_key = os.getenv("API_SECRET_KEY")
     if not expected_key:
@@ -109,50 +122,47 @@ async def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
          description="⚠️ Может вернуть большой объём данных. Используйте с осторожностью.")
 async def get_all_plugin_results(api_key: bool = Depends(verify_api_key)):
     plugin_repo = PluginResultRepository()
-    results = await plugin_repo.get_all_results()
-    return {"plugin_results": results}
+    loop = asyncio.get_event_loop()
+    try:
+        results = await loop.run_in_executor(db_executor, plugin_repo.get_all_results)
+        return {"plugin_results": results}
+    except Exception as e:
+        print(f"❌ DB Error: {e}")  # Теперь увидишь ошибку!
+        raise HTTPException(status_code=500, detail="Database error")
 
 
+# main.py
 @app.get("/api/v1/files/{filename}/plugin-results",
-         summary="Get plugin results by filename",
-         description="Get all plugin results for a specific parsed file")
+         summary="Get LATEST plugin results by filename")
 async def get_plugin_results_by_file(
-    filename: str,
-    api_key: bool = Depends(verify_api_key)
+        filename: str,
+        api_key: bool = Depends(verify_api_key),
+        only_success: bool = False  # ← опциональный фильтр
 ):
     plugin_repo = PluginResultRepository()
-    results = await plugin_repo.get_results_by_filename(filename)
+    loop = asyncio.get_event_loop()
+
+    # Используем синхронный вызов в executor
+    results = await loop.run_in_executor(
+        db_executor,
+        plugin_repo.get_latest_results_by_filename,
+        filename
+    )
+
+    # Фильтруем ошибки, если нужно
+    if only_success:
+        results = [r for r in results if r["success"]]
+
+    # Улучшаем сообщения об ошибках
+    for r in results:
+        if not r["success"] and "StatusCode.UNAVAILABLE" in r["message"]:
+            r["message"] = "Плагин недоступен (не запущен или неправильный порт)"
+        elif not r["success"] and "StatusCode.UNIMPLEMENTED" in r["message"]:
+            r["message"] = "Плагин не реализует метод ProcessSegment"
+        # Можно добавить другие улучшения
+
     if not results:
         raise HTTPException(status_code=404, detail=f"No plugin results found for file '{filename}'")
+
     return {"filename": filename, "plugin_results": results}
 
-
-@app.get("/api/v1/files/{filename}/segments/{segment_id}/plugin-results",
-         summary="Get plugin results by segment",
-         description="Get plugin results for a specific segment within a file")
-async def get_plugin_results_by_segment(
-    filename: str,
-    segment_id: int,
-    api_key: bool = Depends(verify_api_key)
-):
-    plugin_repo = PluginResultRepository()
-    results = await plugin_repo.get_results_by_segment(filename, segment_id)
-    if not results:
-        raise HTTPException(status_code=404, detail=f"No results for segment {segment_id} in file '{filename}'")
-    return {
-        "filename": filename,
-        "segment_id": segment_id,
-        "plugin_results": results
-    }
-
-
-@app.get("/api/v1/plugins/{plugin_address}/results",
-         summary="Get results by plugin address",
-         description="Get all results from a specific plugin (e.g., 'localhost:50051')")
-async def get_results_by_plugin(
-    plugin_address: str,
-    api_key: bool = Depends(verify_api_key)
-):
-    plugin_repo = PluginResultRepository()
-    results = await plugin_repo.get_results_by_plugin(plugin_address)
-    return {"plugin_address": plugin_address, "plugin_results": results}

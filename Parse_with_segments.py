@@ -15,10 +15,11 @@ class ParseWithLogs:
     ]
 
     @classmethod
-    async def process_segments_with_plugins(cls, segments, filename: str):
+    def process_segments_with_plugins(cls, segments, filename: str):
         """
         Отправляет сегменты в плагины и сохраняет результаты в БД.
         """
+        print(f"🚀 Запуск плагинов для файла: {filename}")
         plugin_repo = PluginResultRepository()
 
         for segment in segments:
@@ -34,7 +35,7 @@ class ParseWithLogs:
                     plugin_name = response.metadata.get("plugin", "unknown")
 
                     # Сохраняем в БД
-                    await plugin_repo.save_plugin_result(
+                    plugin_repo.save_plugin_result(
                         filename=filename,
                         segment_id=segment["Id"],
                         plugin_address=address,
@@ -55,7 +56,7 @@ class ParseWithLogs:
 
                 except Exception as e:
                     # Сохраняем ошибку подключения
-                    await plugin_repo.save_plugin_result(
+                    plugin_repo.save_plugin_result(
                         filename=filename,
                         segment_id=segment["Id"],
                         plugin_address=address,

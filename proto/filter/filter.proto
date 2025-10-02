@@ -1,0 +1,41 @@
+syntax = "proto3";
+package proto.filter;
+
+enum PluginType {
+  UNKNOWN = 0;
+  FILTER = 1;
+}
+
+message LogEntry {
+  string level = 1;
+  string message = 2;
+  string timestamp = 3;
+  string module = 4;
+}
+
+message FilterCriteria {
+  string field = 1;
+  string value = 2;
+  bool exact = 3;
+}
+
+message SegmentRequest {
+  int32 segment_id = 1;
+  string segment_type = 2;
+  string start_time = 3;
+  string end_time = 4;
+  repeated LogEntry logs = 5;
+  PluginType plugin_type = 6;        // ← обязательно!
+  repeated FilterCriteria filters = 7;
+}
+
+message SegmentResponse {
+  bool success = 1;
+  string message = 2;
+  repeated LogEntry logs = 3;
+  map<string, string> metadata = 4;
+}
+
+service PluginService {
+  rpc ProcessSegment(SegmentRequest) returns (SegmentResponse);
+}

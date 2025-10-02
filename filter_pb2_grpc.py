@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from proto import logplugin_pb2 as proto_dot_logplugin__pb2
+import filter_pb2 as filter__pb2
 
 GRPC_GENERATED_VERSION = '1.75.1'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in proto/logplugin_pb2_grpc.py depends on'
+        + f' but the generated code in filter_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -37,8 +37,8 @@ class PluginServiceStub(object):
         """
         self.ProcessSegment = channel.unary_unary(
                 '/proto.PluginService/ProcessSegment',
-                request_serializer=proto_dot_logplugin__pb2.SegmentRequest.SerializeToString,
-                response_deserializer=proto_dot_logplugin__pb2.SegmentResponse.FromString,
+                request_serializer=filter__pb2.SegmentRequest.SerializeToString,
+                response_deserializer=filter__pb2.SegmentResponse.FromString,
                 _registered_method=True)
 
 
@@ -58,8 +58,8 @@ def add_PluginServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'ProcessSegment': grpc.unary_unary_rpc_method_handler(
                     servicer.ProcessSegment,
-                    request_deserializer=proto_dot_logplugin__pb2.SegmentRequest.FromString,
-                    response_serializer=proto_dot_logplugin__pb2.SegmentResponse.SerializeToString,
+                    request_deserializer=filter__pb2.SegmentRequest.FromString,
+                    response_serializer=filter__pb2.SegmentResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -88,8 +88,8 @@ class PluginService(object):
             request,
             target,
             '/proto.PluginService/ProcessSegment',
-            proto_dot_logplugin__pb2.SegmentRequest.SerializeToString,
-            proto_dot_logplugin__pb2.SegmentResponse.FromString,
+            filter__pb2.SegmentRequest.SerializeToString,
+            filter__pb2.SegmentResponse.FromString,
             options,
             channel_credentials,
             insecure,

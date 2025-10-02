@@ -1,5 +1,6 @@
 # plugin_repository.py
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import desc, func
+from sqlalchemy.orm import sessionmaker, aliased
 from models import PluginResult, get_database_engine
 from datetime import datetime
 
@@ -8,7 +9,7 @@ class PluginResultRepository:
         self.engine = get_database_engine()
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
 
-    async def save_plugin_result(
+    def save_plugin_result(
         self,
         filename: str,
         segment_id: int,
@@ -40,7 +41,34 @@ class PluginResultRepository:
         finally:
             db.close()
 
-    async def get_results_by_filename(self, filename: str):
+        # plugin_repository.py
+    def get_all_results(self):
+        """Получить все результаты из базы данных."""
+        db = self.SessionLocal()
+        try:
+            results = db.query(PluginResult).order_by(PluginResult.created_at.desc()).all()
+            return [
+                {
+                    "id": r.id,
+                    "filename": r.filename,
+                    "segment_id": r.segment_id,
+                    "plugin_address": r.plugin_address,
+                    "plugin_name": r.plugin_name,
+                    "success": r.success == "true",
+                    "message": r.message,
+                    "metadata": r.metadata_json,
+                    "filtered_logs": r.filtered_logs,
+                    "created_at": r.created_at.isoformat() if r.created_at else None
+                }
+                for r in results
+            ]
+        except Exception as e:
+            print(f"❌ Ошибка в get_all_results: {e}")
+            raise
+        finally:
+            db.close()
+
+    def get_results_by_filename(self, filename: str):
         """Получить все результаты плагинов по имени файла"""
         db = self.SessionLocal()
         try:
@@ -61,14 +89,57 @@ class PluginResultRepository:
         finally:
             db.close()
 
-    async def get_results_by_segment(self, filename: str, segment_id: int):
-        """Получить результаты плагинов для конкретного сегмента"""
+
+    # plugin_repository.py
+    def delete_results_by_filename(self, filename: str):
+        """Удаляет все результаты плагинов для файла."""
         db = self.SessionLocal()
         try:
-            results = db.query(PluginResult).filter(
-                PluginResult.filename == filename,
-                PluginResult.segment_id == segment_id
-            ).all()
-            return [ ... ]  # аналогично выше
+            db.query(PluginResult).filter(PluginResult.filename == filename).delete()
+            db.commit()
+        finally:
+            db.close()
+
+    def get_latest_results_by_filename(self, filename: str):
+        """Получить последний результат для каждого плагина по файлу."""
+        db = self.SessionLocal()
+        try:
+            # создаём подзапрос: для каждого plugin_address берём max(created_at)
+            subq = (
+                db.query(
+                    PluginResult.plugin_address,
+                    func.max(PluginResult.created_at).label("max_created")
+                )
+                .filter(PluginResult.filename == filename)
+                .group_by(PluginResult.plugin_address)
+                .subquery()
+            )
+
+            # алиас таблицы PluginResult
+            pr_alias = aliased(PluginResult)
+
+            # джоин с подзапросом, чтобы взять полный объект последнего результата
+            latest_results = (
+                db.query(pr_alias)
+                .join(subq,
+                      (pr_alias.plugin_address == subq.c.plugin_address) &
+                      (pr_alias.created_at == subq.c.max_created))
+                .all()
+            )
+
+            # преобразуем в словари
+            return [
+                {
+                    "segment_id": r.segment_id,
+                    "plugin_address": r.plugin_address,
+                    "plugin_name": r.plugin_name,
+                    "success": r.success == "true",
+                    "message": r.message,
+                    "metadata": r.metadata_json,
+                    "filtered_logs": r.filtered_logs,
+                    "created_at": r.created_at.isoformat()
+                }
+                for r in latest_results
+            ]
         finally:
             db.close()
